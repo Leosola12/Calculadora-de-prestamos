@@ -1,5 +1,4 @@
-# app.py — Calculadora de Créditos ARGENTINA 2025 (v1.2 — TIR en UI)
-# Autor: Leonardo Sola (adaptado y mejorado)
+# app.py — Calculadora de Créditos ARGENTINA 2025 
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -527,3 +526,4 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
