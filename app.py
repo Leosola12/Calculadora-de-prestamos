@@ -1,4 +1,4 @@
-# app.py — Calculadora de Créditos ARGENTINA 2025 
+# app.py — Calculadora de Créditos ARGENTINA 2025
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -103,8 +103,35 @@ with st.sidebar:
     st.markdown("---")
     # Gastos y seguros para CFT
     st.subheader("Gastos / Seguros (opcionales)")
-    gastos_upfront = st.number_input("Gastos desembolso (ej: comisiones, escritura)", min_value=0.0, value=0.0, step=100.0, format="%.2f")
-    seguro_mensual = st.number_input("Seguro mensual (si aplica)", min_value=0.0, value=0.0, step=100.0, format="%.2f")
+
+    # === GASTOS DE DESEMBOLSO T=0 ===
+    modo_gasto = st.radio(
+        "Tipo de gastos de desembolso",
+        ["Importe fijo", "% del capital"],
+        horizontal=False,
+        help="Se descuentan en T=0. Pueden cargarse como monto fijo o como porcentaje del capital otorgado."
+    )
+
+    if modo_gasto == "Importe fijo":
+        gastos_upfront = st.number_input(
+            "Gastos desembolso (T=0)",
+            min_value=0.0, value=0.0, step=100.0, format="%.2f",
+            help="Gastos que se descuentan en el desembolso inicial."
+        )
+    else:
+        gastos_porcentaje = st.number_input(
+            "Gastos (% sobre el capital)",
+            min_value=0.0, max_value=100.0, value=0.0, step=0.1,
+            help="Se aplica sobre el monto del préstamo y se descuenta en T=0."
+        )
+        gastos_upfront = monto_raw * (gastos_porcentaje / 100.0)
+
+    # === SEGUROS MENSUALES ===
+    seguro_mensual = st.number_input(
+        "Seguros y gastos mensuales",
+        min_value=0.0, value=0.0, step=100.0, format="%.2f",
+        help="Cargo que se suma a cada cuota mensual (seguros y otros costos recurrentes)."
+    )
 
     st.markdown("---")
     # Modo demo (ejemplo preconfigurado)
@@ -490,16 +517,17 @@ if st.session_state.get("calculado", False):
         for s in sistemas_a_probar:
             try:
                 df_s, tp_s, ti_s, pagos_s = calcular_amortizacion(monto, plazo_meses, tem, s, uva_hoy, infla, seguro_mensual, round_money=True)
-                cft_s = calcular_cft_simple(monto, tp_s, gastos_upfront)
+                # CFTEA (TIR efectiva anual)
+                r_s, cftea_s = calcular_cft_anualizado(monto, pagos_s, gastos_upfront)
                 rows.append({
                     "Sistema": s,
                     "Cuota inicial": peso(df_s.loc[0, "Cuota"]) if not df_s.empty else "-",
                     "Total pagado": peso(tp_s),
                     "Intereses totales": peso(ti_s),
-                    "CFT aprox": f"{cft_s:.2f}%"
+                    "CFTEA": f"{cftea_s:.2f}%" if cftea_s is not None else "—"
                 })
             except Exception as e:
-                rows.append({"Sistema": s, "Cuota inicial": "—", "Total pagado": "—", "Intereses totales": "—", "CFT aprox": "—"})
+                rows.append({"Sistema": s, "Cuota inicial": "—", "Total pagado": "—", "Intereses totales": "—", "CFTEA": "—"})
         st.table(pd.DataFrame(rows))
 
     # ===================== EJEMPLO PRECALCULADO (opcional) =====================
@@ -526,4 +554,3 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-
