@@ -85,7 +85,7 @@ with st.sidebar:
     sistema = st.selectbox("Sistema de amortización", [
         "Francés (cuota fija en pesos)",
         "Francés UVA (cuota fija en UVA)",
-        "Alemán (abono capital fijo)"
+        "Alemán (amortización de capital fija)"
     ], index=0)
 
     # UVA params
@@ -243,7 +243,7 @@ def calcular_amortizacion(monto, plazo_meses, tem, sistema, uva_hoy=None, infla=
             "Mes": mes,
             "Cuota": cuota_mes,
             "Interés": interes_mes,
-            "Abono": abono_mes,
+            "Amortización": abono_mes,
             "Saldo": max(saldo, 0.0)
         })
 
@@ -252,7 +252,7 @@ def calcular_amortizacion(monto, plazo_meses, tem, sistema, uva_hoy=None, infla=
         ultimo = tabla[-1]
         if ultimo["Saldo"] != 0 and abs(ultimo["Saldo"]) < 1.0:
             diff = ultimo["Saldo"]
-            ultimo["Abono"] = round_centavos(ultimo["Abono"] + diff)
+            ultimo["Amortización"] = round_centavos(ultimo["Amortización"] + diff)
             ultimo["Cuota"] = round_centavos(ultimo["Cuota"] + diff)
             ultimo["Saldo"] = 0.0
             total_pagado = round_centavos(sum(row["Cuota"] for row in tabla))
@@ -263,10 +263,6 @@ def calcular_amortizacion(monto, plazo_meses, tem, sistema, uva_hoy=None, infla=
     return df, total_pagado, total_interes, pagos_mensuales
 
 # ===================== CFT =====================
-def calcular_cft_simple(monto, total_pagado, gastos_upfront=0.0):
-    """CFT aproximado (no anualizado): comparacion total pagado vs desembolso"""
-    return ((total_pagado + gastos_upfront) - monto) / monto * 100.0
-
 def calcular_cft_anualizado(monto, pagos_mensuales, gastos_upfront=0.0):
     """
     CFTEA: calcula la tasa periódica r (TIR mensual) que anula el VAN con flujos:
@@ -325,9 +321,9 @@ def crear_pdf(df, total_pagado, total_interes, sistema, tna, plazo_meses, monto)
     elements.append(Spacer(1, 6*mm))
 
     # Tabla de amortización (resumida) en PDF
-    data = [["Mes", "Cuota", "Interés", "Abono Capital", "Saldo"]]
+    data = [["Mes", "Cuota", "Interés", "Amortización de capital", "Saldo"]]
     for _, r in df.iterrows():
-        data.append([str(int(r["Mes"])), peso(r["Cuota"]), peso(r["Interés"]), peso(r["Abono"]), peso(r["Saldo"])])
+        data.append([str(int(r["Mes"])), peso(r["Cuota"]), peso(r["Interés"]), peso(r["Amortización"]), peso(r["Saldo"])])
     data.append(["TOTAL", peso(total_pagado), peso(total_interes), "", ""])
     table = Table(data, colWidths=[25*mm, 50*mm, 50*mm, 50*mm, 50*mm])
     table.setStyle(TableStyle([
@@ -366,38 +362,24 @@ if st.session_state.get("calculado", False):
         st.error(f"Error en cálculo: {e}")
         st.stop()
 
-    # KPI
-    años = plazo_meses / 12.0 if plazo_meses > 0 else 1.0
-
-    # Cálculos de CFT / TEA / CFTEA / CFTNA
-    cft_simple = calcular_cft_simple(monto, total_pagado, gastos_upfront)
+    # Cálculos de TEA y CFTEA
     r_per_pct, cft_anual_pct = calcular_cft_anualizado(monto, pagos_mensuales, gastos_upfront)
-    # CFTNA (aprox) — costo financiero total nominal anual simple (aproximación)
-    # Definimos CFTNA_simple = CFT_simple / años (porcentaje anual nominal sin capitalización)
-    cftna_simple = cft_simple / años
 
     # TEA (tasa efectiva anual pura a partir de TEM)
     tea_calc = (1 + tem) ** 12 - 1
 
     # Mostrar KPIs con tooltips (help)
-    col1, col2, col3, col4 = st.columns([1,1,1,1])
+    col1, col2, col3 = st.columns([1, 1, 1])
     col1.metric("Total a pagar", peso(total_pagado))
     col2.metric("Intereses totales", peso(total_interes))
     col3.metric(
-        "CFT aproximado (no anualizado) ",
-        f"{cft_simple:.2f}%",
-        help="Cálculo simple: (Total pagado + gastos - monto) / monto. Es una aproximación que NO capitaliza ni considera el calendario de pagos."
-    )
-    col4.metric(
         "TIR → CFTEA (efectiva anual) ",
         f"{cft_anual_pct:.2f}%" if r_per_pct is not None else "—",
         help="CFTEA: calculada a partir de la TIR (Tasa Interna de Retorno) mensual, obtenida resolviendo el VAN = 0 con los flujos del préstamo (desembolso y pagos)."
     )
 
-    # Mostrar TEA y CFTNA en línea debajo
-    st.markdown(
-        f"**TEA (efectiva anual, desde TEM):** {tea_calc*100:.3f}%  •  **CFTNA (nominal anual aprox):** {cftna_simple:.2f}%"
-    )
+    # Mostrar TEA en línea debajo
+    st.markdown(f"**TEA (efectiva anual, desde TEM):** {tea_calc*100:.3f}%")
     st.markdown("*(Pasa el cursor sobre los indicadores con (?) para ver definiciones rápidas)*")
 
     st.divider()
@@ -405,7 +387,7 @@ if st.session_state.get("calculado", False):
 
     # FIX OVERFLOW: convertir a strings antes de mostrar (evita pyarrow OverflowError)
     df_display = df.copy()
-    for col in ["Cuota", "Interés", "Abono", "Saldo"]:
+    for col in ["Cuota", "Interés", "Amortización", "Saldo"]:
         df_display[col] = df_display[col].map(peso)
 
     st.dataframe(df_display, use_container_width=True)
@@ -434,7 +416,7 @@ if st.session_state.get("calculado", False):
     # Excel
     excel_buffer = BytesIO()
     df_export = df.copy()
-    for col in ["Cuota", "Interés", "Abono", "Saldo"]:
+    for col in ["Cuota", "Interés", "Amortización", "Saldo"]:
         df_export[col] = df_export[col].map(lambda x: f"{x:.2f}")
     df_export.to_excel(excel_buffer, index=False, engine='openpyxl')
     excel_buffer.seek(0)
@@ -444,7 +426,7 @@ if st.session_state.get("calculado", False):
 
     # CSV (con formato peso)
     csv_df = df.copy()
-    for col in ["Cuota", "Interés", "Abono", "Saldo"]:
+    for col in ["Cuota", "Interés", "Amortización", "Saldo"]:
         csv_df[col] = csv_df[col].map(peso)
     csv_bytes = csv_df.to_csv(index=False).encode('utf-8-sig')
 
@@ -460,25 +442,14 @@ if st.session_state.get("calculado", False):
     st.divider()
 
     # ===================== PANEL DIDACTICO: FÓRMULAS Y VALORES =====================
-    with st.expander("🔢 Mostrar fórmulas y cálculo numérico (TEA / CFT / CFTNA / CFTEA)", expanded=False):
+    with st.expander("🔢 Mostrar fórmulas y cálculo numérico (TEA / CFTEA)", expanded=False):
         st.markdown("## Definiciones rápidas")
         st.markdown("- **TEA**: Tasa Efectiva Anual (interés puro, sin incluir gastos).")
-        st.markdown("- **CFT (aprox)**: Indicador simple que compara el total pagado con el desembolso; **no** anualizado ni capitalizado (útil para una visión rápida).")
-        st.markdown("- **CFTNA**: Costo Financiero Total Nominal Anual (aproximación nominal anual). Se usa como indicador nominal para comparar, pero **no** reemplaza a CFTEA.")
         st.markdown("- **CFTEA (recomendado)**: Costo Financiero Total Efectivo Anual. Es la tasa efectiva anual que iguala el desembolso neto y todos los pagos (se calcula a partir de la TIR mensual).")
 
         st.markdown("### TEA (desde TEM)")
         st.latex(r"\mathrm{TEA} = (1+i)^{12} - 1")
         st.markdown(f"- Con i (mensual) = {tem:.6f} → TEA = **{tea_calc*100:.3f}%**")
-
-        st.markdown("### CFT (aproximado, no anualizado)")
-        st.latex(r"\mathrm{CFT} \approx \frac{Total\ pagado - Desembolso}{Desembolso}")
-        st.markdown(f"- Total pagado = {peso(total_pagado)} • Desembolso (monto) = {peso(monto)}")
-        st.markdown(f"- CFT (aprox) = **{cft_simple:.2f}%**")
-
-        st.markdown("### CFTNA (Costo Financiero Total Nominal Anual — aproximación)")
-        st.latex(r"\mathrm{CFTNA_{approx}} \approx \frac{CFT_{aprox}}{A\tilde{n}os} \quad (\text{porcentaje nominal anual, sin capitalizar})")
-        st.markdown(f"- Período: {años:.2f} años → CFTNA aprox = **{cftna_simple:.2f}%**")
 
         st.markdown("### TIR (mensual) y CFTEA (Costo Financiero Total Efectivo Anual)")
         st.markdown("""
@@ -512,7 +483,7 @@ if st.session_state.get("calculado", False):
         sistemas_a_probar = [
             "Francés (cuota fija en pesos)",
             "Francés UVA (cuota fija en UVA)",
-            "Alemán (abono capital fijo)"
+            "Alemán (amortización de capital fija)"
         ]
         for s in sistemas_a_probar:
             try:
